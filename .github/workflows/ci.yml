@@ -1,0 +1,33 @@
+name: CI
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -e ".[dev]" pypdf
+      - run: python -m pytest -q
+      - name: CLI smoke
+        run: |
+          sentinel-findings tools
+          echo '[{"host":"h","port":443,"severity":"high","code":"x","title":"t","detail":"d","provenance":"observed","confidence":"high"}]' > /tmp/cw.json
+          sentinel-findings convert --tool certwatch --in /tmp/cw.json --out /tmp/n.json
+          sentinel-findings report --in /tmp/n.json --pdf /tmp/r.pdf
+          python -c "from pypdf import PdfReader; r=PdfReader('/tmp/r.pdf'); print('pages', len(r.pages)); assert len(r.pages) >= 1"
+      - name: Honesty gate refuses simulated findings
+        run: |
+          printf '{"findings":[{"title":"fake","severity":"high","provenance":"simulated","tool":"x"}]}' > /tmp/sim.json
+          set +e
+          sentinel-findings report --in /tmp/sim.json --pdf /tmp/s.pdf
+          code=$?
+          set -e
+          echo "exit=$code"
+          test "$code" -eq 2
+          echo "gate correctly refused"
